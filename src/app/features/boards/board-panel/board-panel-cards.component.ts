@@ -66,6 +66,7 @@ export class BoardPanelCardsComponent {
   protected readonly T = T;
   protected readonly dragDelayForTouch = dragDelayForTouch;
   private readonly _trackingInterval = inject(GlobalTrackingIntervalService);
+  readonly todayDateStr = this._trackingInterval.todayDateStr;
   private readonly _dateService = inject(DateService);
   private readonly _cards = viewChildren(PlannerTaskComponent, { read: ElementRef });
 
@@ -97,8 +98,11 @@ export class BoardPanelCardsComponent {
   }
 
   deadlineColor(task: TaskCopy): ScheduledDateColor {
-    return isDeadlineOverdue(task, this._trackingInterval.todayDateStr())
-      ? 'overdue'
-      : '';
+    if (task.isDone) return '';
+    // Timed deadlines read the shared clock so an idle OnPush board recolors at expiry.
+    const isOverdue = task.deadlineWithTime
+      ? task.deadlineWithTime < this._trackingInterval.clockTimestamp()
+      : isDeadlineOverdue(task, this._trackingInterval.todayDateStr());
+    return isOverdue ? 'overdue' : '';
   }
 }

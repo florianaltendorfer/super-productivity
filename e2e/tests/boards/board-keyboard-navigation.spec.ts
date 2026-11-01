@@ -1,20 +1,24 @@
-import { Page } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test.fixture';
 import { waitForMenuSettled, waitForStatePersistence } from '../../utils/waits';
+import {
+  addViewRule,
+  columnTitleButton,
+  createView,
+  saveViewEditor,
+  setViewSort,
+  viewEditorSection,
+} from '../../utils/view-helpers';
 
 const openKanban = async (page: Page): Promise<void> => {
-  await page.goto('/#/boards');
-  await page
-    .getByRole('tab')
-    .filter({ hasText: /kanban/i })
-    .click();
-  const kanbanPanel = page.getByRole('tabpanel', { name: 'Kanban', exact: true });
-  await expect(kanbanPanel).toBeVisible();
-  // The button can pass Playwright's stability check while the tab is still sliding.
-  await expect(kanbanPanel).not.toHaveClass(/mat-tab-body-animating/);
-  await kanbanPanel.getByRole('button', { name: 'Create Tag', exact: true }).click();
+  await page.goto('/#/boards/KANBAN_DEFAULT');
+  await page.getByRole('button', { name: 'Create Tag', exact: true }).click();
   await expect(page.locator('[data-board-selection-scope="TODO"]')).toBeVisible();
 };
+
+/** A column's header "+", the arrow keys' target in an empty column. */
+const addButton = (panel: Locator): Locator =>
+  panel.locator('header').getByRole('button', { name: /^Add task to / });
 
 test.describe('Board keyboard navigation', () => {
   test('keeps task focus while moving up and down within and between vertical panels', async ({
@@ -26,8 +30,7 @@ test.describe('Board keyboard navigation', () => {
     for (const name of ['Alpha', 'Beta', 'Gamma']) {
       await workViewPage.addTask(`${testPrefix}-${name}`);
     }
-    await page.goto('/#/boards');
-    await page.getByRole('tab').first().click();
+    await page.goto('/#/boards/EISENHOWER_MATRIX');
     await page.getByRole('button', { name: /Create.*Tags/i }).click();
     const panels = page.locator('board-panel');
     const source = panels.nth(3).locator('planner-task');
@@ -104,8 +107,7 @@ test.describe('Board keyboard navigation', () => {
   }) => {
     await workViewPage.waitForTaskList();
     await workViewPage.addTask(`${testPrefix}-Grid task`);
-    await page.goto('/#/boards');
-    await page.getByRole('tab').first().click();
+    await page.goto('/#/boards/EISENHOWER_MATRIX');
     await page.getByRole('button', { name: /Create.*Tags/i }).click();
     const panels = page.locator('board-panel');
     await expect(panels).toHaveCount(4);
@@ -113,9 +115,9 @@ test.describe('Board keyboard navigation', () => {
     await expect(card).toHaveCount(1);
     await card.focus();
     await page.keyboard.press('ArrowLeft');
-    await expect(panels.nth(2).locator('add-task-inline button')).toBeFocused();
+    await expect(addButton(panels.nth(2))).toBeFocused();
     await page.keyboard.press('ArrowLeft');
-    await expect(panels.nth(2).locator('add-task-inline button')).toBeFocused();
+    await expect(addButton(panels.nth(2))).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expect(card).toBeFocused();
     await page.keyboard.press('Control+Shift+ArrowLeft');
@@ -126,11 +128,11 @@ test.describe('Board keyboard navigation', () => {
     await expect(moved).toHaveCount(1);
     await expect(panels.nth(1).locator('planner-task')).toHaveCount(0);
 
-    await panels.nth(0).locator('add-task-inline button').focus();
+    await addButton(panels.nth(0)).focus();
     await page.keyboard.press('ArrowRight');
-    await expect(panels.nth(1).locator('add-task-inline button')).toBeFocused();
+    await expect(addButton(panels.nth(1))).toBeFocused();
     await page.keyboard.press('ArrowRight');
-    await expect(panels.nth(1).locator('add-task-inline button')).toBeFocused();
+    await expect(addButton(panels.nth(1))).toBeFocused();
 
     await page.setViewportSize({ width: 375, height: 900 });
     await moved.focus();
@@ -183,17 +185,20 @@ test.describe('Board keyboard navigation', () => {
     await openKanban(page);
     const todo = page.locator('[data-board-selection-scope="TODO"]');
     const progress = page.locator('[data-board-selection-scope="IN_PROGRESS"]');
-    await todo.locator('add-task-inline button').click();
+    await addButton(todo).click();
     for (const name of ['First', 'Second']) {
       await todo.locator('add-task-bar .main-input').fill(`${testPrefix}-${name}`);
       await page.keyboard.press('Enter');
     }
     await page.keyboard.press('Escape');
-    await todo.locator('header button').click();
+    await columnTitleButton(todo, 'To Do').click();
     const editor = page.locator('dialog-board-edit');
-    await editor.getByRole('radio', { name: 'Scheduled', exact: true }).nth(1).check();
-    await editor.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(editor).toHaveCount(0);
+    // In progress only shows planned tasks.
+    await addViewRule(page, viewEditorSection(editor, 1), {
+      rule: 'Planned Date',
+      value: 'Has a date',
+    });
+    await saveViewEditor(editor);
     const cards = todo.locator('planner-task');
     await expect(cards).toHaveCount(2);
     await cards.first().focus();
@@ -241,21 +246,12 @@ test.describe('Board keyboard navigation', () => {
     await workViewPage.waitForTaskList();
     for (const name of ['Alpha', 'Beta', 'Gamma'])
       await workViewPage.addTask(`${testPrefix}-${name}`);
-    await page.goto('/#/boards');
-    await page.getByRole('tab').last().click();
-    const form = page.locator('board-edit');
-    await form
-      .getByRole('textbox', { name: 'Title', exact: true })
-      .fill(`${testPrefix}-Duplicates`);
-    const titles = form.getByRole('textbox', { name: 'Title', exact: true });
-    for (const [i, name] of ['First panel', 'Second panel'].entries()) {
-      await form.getByRole('button', { name: 'Add new Panel' }).click();
-      // The new panel row renders asynchronously; without this wait `.last()`
-      // can still resolve to the previous row and overwrite its title.
-      await expect(titles).toHaveCount(i + 2);
-      await titles.last().fill(name);
-    }
-    await form.getByRole('button', { name: 'Save', exact: true }).click();
+    // Two columns keep cards (a one-column view lists task rows).
+    await createView(page, {
+      title: `${testPrefix}-Duplicates`,
+      layout: 'board',
+      sections: [{ title: 'First panel' }, { title: 'Second panel' }],
+    });
     const panels = page.locator('board-panel');
     const first = panels.nth(0).locator('planner-task');
     const second = panels.nth(1).locator('planner-task');
@@ -270,11 +266,15 @@ test.describe('Board keyboard navigation', () => {
     await expect(second.nth(1)).toContainText('Alpha');
     await expect(first.nth(0)).toContainText('Alpha');
 
-    await panels.nth(1).locator('header button').click();
+    await columnTitleButton(panels.nth(1), 'Second panel').click();
     const dialog = page.locator('dialog-board-edit');
-    await dialog.getByRole('combobox', { name: 'Sort by', exact: true }).last().click();
-    await page.getByRole('option', { name: 'Title', exact: true }).click();
-    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+    // The clicked column's section is the open one.
+    await expect(viewEditorSection(dialog, 1).locator('.section-toggle')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await setViewSort(page, viewEditorSection(dialog, 1), 'Title');
+    await saveViewEditor(dialog);
     await expect(second.first()).toContainText('Alpha');
     await second.first().focus();
     await page.keyboard.press('Control+Shift+ArrowDown');
@@ -298,9 +298,15 @@ test.describe('Board keyboard navigation', () => {
     await expect(cards).toHaveCount(3);
     await cards.first().focus();
     await page.keyboard.press('ArrowRight');
-    await expect(progress.locator('add-task-inline button')).toBeFocused();
+    await expect(addButton(progress)).toBeFocused();
+    // Enter opens the add bar at the top of the column; Escape comes back.
+    await page.keyboard.press('Enter');
+    await expect(progress.locator('add-task-bar .main-input')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(progress.locator('add-task-bar')).toHaveCount(0);
+    await expect(addButton(progress)).toBeFocused();
     await page.keyboard.press('ArrowRight');
-    await expect(done.locator('add-task-inline button')).toBeFocused();
+    await expect(addButton(done)).toBeFocused();
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('ArrowLeft');
     await expect(cards.first()).toBeFocused();
@@ -355,7 +361,7 @@ test.describe('Board keyboard navigation', () => {
     await expect(cards.first()).toBeFocused();
     await page.keyboard.press('d');
     await expect(cards).toHaveCount(0);
-    await expect(todo.locator('add-task-inline button')).toBeFocused();
+    await expect(addButton(todo)).toBeFocused();
     await expect(
       page.locator('[data-board-selection-scope="DONE"] planner-task'),
     ).toHaveCount(1);

@@ -28,10 +28,75 @@
       border-bottom: var(--task-row-edge);
     }
   }
+}
 
-  add-task-inline {
-    display: block;
+// Opened from the header "+", above the column's cards or the section's rows.
+.panel-add-task-bar {
+  margin: var(--s);
+}
+
+// Part of one task list (the view's only list, or one of its sections): no
+// box of its own, the page scrolls.
+:host(.isListLayout) {
+  border: 0;
+  border-radius: 0;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+// A one-column view nothing matches: what it is and how to fill it.
+.view-empty {
+  text-align: center;
+  padding: var(--s4) var(--s2);
+}
+
+.view-empty-title {
+  margin: 0 0 var(--s);
+  font-size: var(--font-size-xl);
+  font-weight: 400;
+}
+
+.view-empty-hint {
+  max-width: 420px;
+  margin: 0 auto var(--s2);
+  color: var(--text-color-muted);
+}
+
+.view-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s);
+}
+
+.list-status {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--s);
+  padding: 0 var(--s) var(--s-half);
+  font-size: var(--font-size-sm);
+  color: var(--text-color-muted);
+
+  .count {
+    display: flex;
+    align-items: center;
+    gap: var(--s-quarter);
   }
+
+  mat-icon {
+    font-size: 14px;
+    line-height: 14px;
+    height: 14px;
+    width: 14px;
+  }
+}
+
+.task-section .tasks-total-estimate {
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  color: var(--text-color-muted);
 }
 
 header {
@@ -39,6 +104,8 @@ header {
   padding-right: var(--s-half);
   display: flex;
   align-items: center;
+  // As tall with or without the "+": the title alone is a button too.
+  min-height: calc(var(--s5) + 2 * var(--s-half));
 
   //@include mousePrimaryDevice() {
   //  button {
@@ -51,14 +118,10 @@ header {
   //  }
   //}
 
+  // Material's own icon-button look, like the "+" in a section header.
   button {
     //margin-left: auto;
     margin-left: 10px;
-    opacity: 0.7;
-
-    &:hover {
-      opacity: 1;
-    }
   }
 
   // Same label treatment as the task-list section headings (collapsible
@@ -69,8 +132,23 @@ header {
     letter-spacing: var(--letter-spacing-wide);
     color: var(--text-color-muted);
     // `auto` (not a fixed gap): the meta next to it is omitted when the panel is
-    // empty, so the title has to be what pushes the edit button to the far edge.
+    // empty, so the title has to be what pushes the "+" to the far edge.
     margin-right: auto;
+
+    // A button (it opens the editor): the header's height to tap, inset a
+    // little so the focus ring doesn't touch the text.
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding-inline: var(--s-half);
+    margin-left: calc(-1 * var(--s-half));
+    border-radius: var(--card-border-radius);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--text-color);
+    }
   }
 
   .tasks-total-estimate {

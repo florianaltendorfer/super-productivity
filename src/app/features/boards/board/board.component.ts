@@ -3,6 +3,8 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
+  effect,
   ElementRef,
   inject,
   input,
@@ -15,9 +17,7 @@ import {
 } from '../board-panel/board-panel.component';
 import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
-import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
-import { selectAllTagIds } from '../../tag/store/tag.reducer';
 import { unique } from '../../../util/unique';
 import { addTag } from '../../tag/store/tag.actions';
 import {
@@ -27,9 +27,14 @@ import {
   URGENT_TAG,
 } from '../../tag/tag.const';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
-import { MatDialog } from '@angular/material/dialog';
-import { DialogBoardEditComponent } from '../dialog-board-edit/dialog-board-edit.component';
+import { BoardsService } from '../boards.service';
 import { T } from '../../../t.const';
+import { ViewTaskListRegistry } from '../../tasks/view-task-list-registry.service';
+import { ViewCriteriaContextService } from '../view-criteria-context.service';
+import { expandOutOnlyAnimation } from '../../../ui/animations/expand.ani';
+
+// The tags the default views use, created with their fixed ids.
+const DEFAULT_VIEW_TAGS = [IMPORTANT_TAG, URGENT_TAG, IN_PROGRESS_TAG];
 
 @Component({
   selector: 'board',
@@ -37,15 +42,20 @@ import { T } from '../../../t.const';
   imports: [BoardPanelComponent, MatIcon, MatButton, TranslatePipe],
   templateUrl: './board.component.html',
   styleUrl: './board.component.scss',
+  animations: [expandOutOnlyAnimation],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    '[style.--cols]': 'missingTagIds().length === 0 && boardCfg().cols',
+    '[style.--cols]': 'boardCfg().cols',
+    // One column reads like a task list: list width, centered.
+    '[class.isSingleColumn]': 'boardCfg().cols <= 1',
+    '[class.isListLayout]': 'isListLayout()',
   },
 })
 export class BoardComponent {
   private _store = inject(Store);
   private _translateService = inject(TranslateService);
-  private _matDialog = inject(MatDialog);
+  private _boardsService = inject(BoardsService);
+  private _viewCtx = inject(ViewCriteriaContextService);
 
   boardCfg = input.required<BoardCfg>();
   private _panels = viewChildren(BoardPanelComponent);
@@ -85,23 +95,48 @@ export class BoardComponent {
     target.focusRow(event.rowIndex, event.focusTaskId ?? event.taskIds?.[0]);
   }
 
-  allExistingTagIds = toSignal(this._store.select(selectAllTagIds), { initialValue: [] });
+  // A one-column view reads like a task list: task rows instead of cards,
+  // its stacked panels being sections of that list (rows move between them
+  // by drag and keyboard as cards did). Boards with columns keep their cards.
+  readonly isListLayout = computed(() => this.boardCfg().cols <= 1);
+  readonly isSectioned = computed(
+    () => this.isListLayout() && this.boardCfg().panels.length > 1,
+  );
 
+  constructor() {
+    // The open view list's columns, in display order: the add-task bar adds
+    // into the first one that accepts new tasks.
+    const registry = inject(ViewTaskListRegistry);
+    effect(() => {
+      registry.set(this, this.isListLayout() ? this._panels() : []);
+    });
+    inject(DestroyRef).onDestroy(() => registry.clear(this));
+  }
+
+  // Tags the rules name that don't exist (the default views' tags on an
+  // install that never created them). The columns still show; moves and adds
+  // that would write such a tag are refused (BoardPanelComponent).
   missingTagIds = computed(() => {
-    const allExistingTagIds: string[] = this.allExistingTagIds() as string[];
-    const allPanelTagIds = this.boardCfg().panels.reduce<string[]>((acc, panel) => {
-      return [...acc, ...(panel.includedTagIds || []), ...(panel.excludedTagIds || [])];
-    }, []);
-    return unique(allPanelTagIds.filter((tagId) => !allExistingTagIds.includes(tagId)));
+    const existing = this._viewCtx.tagIdSet();
+    const allPanelTagIds = this.boardCfg().panels.flatMap((panel) => [
+      ...(panel.includedTagIds || []),
+      ...(panel.excludedTagIds || []),
+    ]);
+    return unique(allPanelTagIds.filter((tagId) => !existing.has(tagId)));
   });
+
+  // Default tags by their title (plain strings), an unknown id as is.
+  missingTagNames = computed(() =>
+    this.missingTagIds()
+      .map((id) => DEFAULT_VIEW_TAGS.find((tag) => tag.id === id)?.title ?? id)
+      .join(', '),
+  );
 
   createTags(): void {
     const missingTagIds = this.missingTagIds();
     if (missingTagIds.length) {
       missingTagIds.forEach((tagId) => {
-        const defaultTags = [IMPORTANT_TAG, URGENT_TAG, IN_PROGRESS_TAG];
-
-        const defaultTag = defaultTags.find((tagInner) => tagInner.id === tagId);
+        const defaultTag = DEFAULT_VIEW_TAGS.find((tagInner) => tagInner.id === tagId);
 
         const tag = defaultTag
           ? {
@@ -119,12 +154,9 @@ export class BoardComponent {
     }
   }
 
-  editBoard(): void {
-    this._matDialog.open(DialogBoardEditComponent, {
-      data: {
-        board: this.boardCfg(),
-      },
-    });
+  /** `panelId`: the column whose title was clicked, shown open. */
+  editBoard(panelId?: string): void {
+    void this._boardsService.editBoard(this.boardCfg(), panelId);
   }
 
   protected readonly T = T;
